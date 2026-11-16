@@ -1,0 +1,27 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+# Plan files are build artifacts, not source
+*.tfplan
+*.tfplan.json
+
+# Terraform-generated application config (managed by infra/local-demo)
+generated/
+
+# Local application data
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
