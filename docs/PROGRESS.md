@@ -3,7 +3,7 @@
 Running record of what has been done, verified and still outstanding.
 Each entry states how a fact was established, so nothing rests on recollection.
 
-Last updated: 2026-11-16
+Last updated: 2026-11-16 (MCP server approved and connected)
 
 ---
 
@@ -11,7 +11,7 @@ Last updated: 2026-11-16
 
 | Phase | Description | Status |
 |---|---|---|
-| 0 | Prerequisites and Terraform MCP connection | **Done** (one item needs your action) |
+| 0 | Prerequisites and Terraform MCP connection | **Done** |
 | 1 | Repository scaffold | Partial — directories and scripts only |
 | 2 | Application (core, storage, server, frontend) | Not started |
 | 3 | Tests | Not started |
@@ -32,7 +32,8 @@ Last updated: 2026-11-16
 | Python | 3.14.8 | `python3 --version` |
 | Docker Engine | 29.9.3 (Docker Desktop) | `docker info` |
 | Terraform MCP Server | **1.4.1** | `docker run --rm <image> --version` |
-| AWS provider (registry latest) | **6.73.0** | MCP `get_latest_provider_version` |
+| AWS provider (registry latest) | **6.73.0** | MCP `get_latest_provider_version` (scripted, then confirmed natively) |
+| `local` provider (registry latest) | **2.9.1** | MCP `get_latest_provider_version` (native) |
 
 Terraform was upgraded from 1.10.4 during this session. Latest stable was
 confirmed as 1.17.2 from HashiCorp's release API, not from memory.
@@ -72,17 +73,33 @@ Tools available in the `registry` toolset:
 | `search_modules`, `get_module_details`, `get_latest_module_version` | Not needed |
 | `search_policies`, `get_policy_details` | Not needed |
 
-### ACTION REQUIRED FROM YOU
+### Approval — done
 
-The server shows **`Pending approval`** in `claude mcp list`. Project-scoped
-MCP servers require explicit approval before the client will connect.
+Project-scoped MCP servers are not trusted automatically: `.mcp.json` is
+committed and travels with the repository, so Claude Code refuses to connect
+until a human approves it once per project. The server sat at
+`Pending approval` until approved interactively at session startup.
 
-> Exit this session, run `claude` in this directory, and approve the
-> `terraform` server when prompted.
+Now confirmed via `claude mcp get terraform`:
 
-Until that is done, documentation retrieval goes through
-`scripts/mcp-query.sh` instead of native MCP tool calls. Both talk to the
-same server with the same toolset; only the client differs.
+```
+Scope: Project config (shared via .mcp.json)
+Status: Connected
+Args:  run -i --rm hashicorp/terraform-mcp-server:1.4.1 stdio --toolsets=registry
+```
+
+Nine native MCP tools are available as `mcp__terraform__*`. Verified by calling
+`get_latest_provider_version` natively for `hashicorp/aws`, which returned
+**6.73.0** — the same answer the scripted client gave, so the two paths agree.
+
+Worth noting for the talk: this is **two independent guardrails**. One human
+(per-project approval of committed configuration) and one capability-level
+(`--toolsets=registry`, which omits every tool that could reach a cloud
+account, workspace or run). `claude mcp reset-project-choices` clears the
+approval if you want to rehearse that prompt on stage.
+
+`scripts/mcp-query.sh` remains the reproducible path and still works; native
+tool calls are now used in preference.
 
 ### Documentation retrieved through MCP
 
@@ -167,26 +184,102 @@ scripts/fetch-aws-docs.sh
 | AWS code scope | Shared storage-agnostic core; SQLite adapter runs locally; DynamoDB adapter and Lambda handler are committed and unit-tested against an injected fake client, never deployed |
 | Workshop label | No city hardcoded. Precedence: Terraform-generated `generated/app-config.json` > `SESSION_PULSE_*` env vars > built-in defaults. Terraform deliberately outranks the env var, which is the point of the `local-demo` root |
 | Dependencies | Python standard library only; `unittest`, not pytest; `boto3` not installed locally |
-| Terraform constraints | `>= 1.7.0` in `aws-reference` (the `mock_provider` floor — still to be confirmed against official docs), `>= 1.0` in `local-demo` |
+| Terraform constraints | `>= 1.7.0` in `aws-reference` (the `mock_provider` floor, confirmed against official docs), `>= 1.0` in `local-demo` |
 | MCP scope | `registry` toolset only; no credentials, no HCP, no workspaces |
 
 ---
 
 ## Next actions when we resume
 
-1. **You:** approve the project-scoped `terraform` MCP server (see above).
-2. Confirm the `mock_provider` minimum Terraform version from official docs.
-3. Phase 2 — application: `app/core/` (questions, validation, aggregation),
+1. Phase 2 — application: `app/core/` (questions, validation, aggregation),
    storage adapters, stdlib server, frontend.
-4. Phase 3 — tests against the full acceptance list.
-5. Phase 4 — write `infra/aws-reference/` from the cached documentation, then
+2. Phase 3 — tests against the full acceptance list.
+3. Phase 4 — write `infra/aws-reference/` from the cached documentation, then
    `fmt`, `init -backend=false`, `validate` and mocked `terraform test`.
-6. Phase 5 — `infra/local-demo/`: real plan, **pause for your approval**, apply,
+4. Phase 5 — `infra/local-demo/`: real plan, **pause for your approval**, apply,
    then a settings change and a second plan.
-7. Phases 6–7 — documentation set, verification pass, grouped commits.
+5. Phases 6–7 — documentation set, verification pass, grouped commits.
 
 ## Nothing has been claimed that was not run
 
 No AWS account was contacted. No cloud credentials exist in this repository.
 No Terraform `init`, `validate`, `test`, `plan` or `apply` has been run yet.
-No commits have been made and nothing has been pushed.
+The only commits are documentation, scripts, MCP configuration and
+MCP-retrieved provider documentation. No application or Terraform code exists
+yet.
+
+---
+
+## Best-practice gaps identified (2026-11-16) — agreed to address later
+
+Reviewed whether this project follows good practice for AI-assisted Terraform
+development. Three real gaps, deferred by decision, not oversight:
+
+1. **No IaC security scanning.** This contradicts the mandatory CI gate in
+   CLAUDE.md (Checkov, fail on CRITICAL/HIGH). `terraform validate` checks
+   schema correctness, not safety — it will validate a wide-open security
+   group without complaint. Trivy 0.69.3 is already installed locally and
+   scans IaC, so `trivy config infra/` could cover this at no cost.
+2. **No CI.** None of the six mandatory security gates run anywhere. For a
+   publicly published workshop repository, a workflow running
+   fmt/validate/test/scan is part of the demo's credibility.
+3. **No linting or pre-commit hooks.** `terraform fmt` and `tflint` as hooks
+   are standard. `tflint` also catches provider-specific errors that
+   `validate` misses, such as invalid instance types or malformed ARNs.
+   Neither `tflint` nor `pre-commit` is installed.
+
+Two weaker spots:
+
+- `get_provider_capabilities` was skipped; the server's own recommended flow is
+  capabilities → details. Use it in Phase 4.
+- The validation discipline is **unproven**: no Terraform has been written yet,
+  so everything about fmt/validate/test remains plan rather than practice.
+
+**The limit worth stating on stage:** documentation retrieval, `validate` and
+mocked tests catch *schema* errors well. They do **not** catch semantic
+wrongness — an IAM policy can validate, pass mocked tests, and still be
+over-permissive. Mocked tests only assert what the author thought to assert.
+That is precisely why a policy scanner belongs in the loop: it encodes
+judgement the author may not have had.
+
+**Sequencing note:** these guardrails are a stronger story if they exist
+*before* the AI writes the Terraform, rather than being retrofitted after.
+
+`AGENTS.md` is also still unwritten. The approval boundaries currently live
+only in a chat session. Committed, they survive a context reset and apply to
+any agent an attendee points at this repository. Write it before Phase 4.
+
+---
+
+## Resume point
+
+**Repository:** https://github.com/chefgs/event-session-pulse (public)
+**Open PR:** #1 `feature/mcp-foundation` → `main` (not merged)
+**Current branch:** `feature/mcp-foundation`
+**Working tree:** clean — this record, and the process guide in
+`docs/iac-with-terraform-mcp.md`, are both committed and pushed
+
+Phase 0 is complete. The Terraform MCP server is approved, connected at project
+scope and verified by a native tool call. Nine `mcp__terraform__*` registry
+tools are available.
+
+`docs/iac-with-terraform-mcp.md` writes Phase 0 up as a reusable, from-zero
+process guide: prerequisites, MCP connection, the validation ladder, mocked
+testing, scanning and approval boundaries. Every claim in it is tagged
+`[verified]`, `[docs]` or `[not executed]`.
+
+Pick up with any of:
+
+- **Phase 2** — application: `app/core/` (questions, validation, aggregation),
+  storage adapters, stdlib server, frontend.
+- **Harden first** — close gaps 1–3 above and write `AGENTS.md` before any
+  Terraform is generated.
+- **Phase 4 prep** — the `mock_provider` floor is settled: `terraform test`
+  needs **1.6.0+**, mocking needs **1.7.0+**, both read from
+  `developer.hashicorp.com`. Worth remembering why the registry MCP toolset
+  could not answer it: that is Terraform *core* documentation, and the toolset
+  serves provider and module documentation only.
+
+Still true: no AWS account contacted, no credentials in the repository, no
+`terraform init`, `validate`, `test`, `plan` or `apply` ever run, nothing
+merged, and `main` holds only its empty root commit.
